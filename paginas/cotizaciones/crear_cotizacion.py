@@ -1,9 +1,8 @@
 import streamlit as st
 from datetime import datetime
-from db.client import MongoDBConnection
+from db.client import MongoDBConnection # Asumiendo que esta importación es correcta
 from streamlit_quill import st_quill
-from paginas.cotizaciones import listar_cotizaciones
-
+import pandas as pd
 
 def show():
     st.title("Generar Nueva Cotización")
@@ -32,10 +31,12 @@ def show():
     except Exception as e:
         st.error(f"No se pudieron cargar los clientes: {e}")
         return
-
-    # --- Estado para materiales ---
-    if "materiales_lista" not in st.session_state:
-        st.session_state.materiales_lista = []
+    
+    # MODIFICACIÓN 1: Eliminar la columna "Total" del DataFrame inicial
+    if "materiales_df" not in st.session_state:
+        st.session_state.materiales_df = pd.DataFrame(
+            columns=["Unidad", "Material", "Cantidad", "Valor Unitario"] # "Total" eliminado
+        )
 
     # --- Formulario ---
     with st.form("new_quote_form", clear_on_submit=True):
@@ -65,81 +66,142 @@ def show():
             ],
         )
 
-        # ---------------- MATERIALES ----------------
+# ---------------- MATERIALES ----------------
         st.markdown("---")
         st.subheader("Listado de Materiales (opcional)")
 
-        col_a, col_b, col_c, col_d = st.columns(4)
-        with col_a:
-            unidad = st.text_input("Unidad", key="unidad_mat")
-        with col_b:
-            material = st.text_input("Material", key="material_mat")
-        with col_c:
-            cantidad = st.number_input(
-                "Cantidad", min_value=1.0, step=1.0, key="cantidad_mat"
-            )
-        with col_d:
-            valor_unitario = st.number_input(
-                "Valor unitario ($)", min_value=0, step=100, key="valor_unitario_mat"
-            )
+        edited_df = st.data_editor(
+            st.session_state.materiales_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "Unidad": st.column_config.TextColumn(
+                    "Unidad", required=True
+                ),
+                "Material": st.column_config.TextColumn(
+                    "Material", required=True
+                ),
+                "Cantidad": st.column_config.NumberColumn(
+                    "Cantidad", min_value=1, step=1, required=True
+                ),
+                "Valor Unitario": st.column_config.NumberColumn(
+                    "Valor Unitario ($)", min_value=0, step=100, required=True
+                ),
+            },
+        )
 
-        if st.form_submit_button("➕ Agregar material"):
-            if unidad and material:
-                total = cantidad * valor_unitario
-                st.session_state.materiales_lista.append(
-                    {
-                        "unidad": unidad,
-                        "material": material,
-                        "cantidad": cantidad,
-                        "valor_unitario": valor_unitario,
-                        "total": total,
-                    }
-                )
-            else:
-                st.warning("Unidad y material son obligatorios.")
-
-        if st.session_state.materiales_lista:
-            st.markdown("### Materiales agregados")
-            st.table(st.session_state.materiales_lista)
+        st.session_state.materiales_df = edited_df
 
         # ---------------- COSTOS ----------------
         st.markdown("---")
         st.subheader("Costos")
+        
+        # CÁLCULO DE TOTAL DE MATERIALES EN LA INTERFAZ (CORREGIDO)
+        if not edited_df.empty:
+            # Aseguramos que el resultado sea un float nativo de Python
+            materiales_total_editor = float(
+                (edited_df["Cantidad"].fillna(0) * edited_df["Valor Unitario"].fillna(0)).sum()
+            )
+        else:
+            materiales_total_editor = 0.0 # Usamos float para consistencia
 
         col3, col4 = st.columns(2)
         with col3:
             mano_obra = st.number_input(
                 "Valor Mano de Obra ($)",
-                min_value=0,
-                step=10000,
+                min_value=0.0, # Usamos float
+                step=10000.0,
             )
 
         with col4:
+            # CORRECCIÓN DEL ERROR DE TIPO EN value
             materiales_manual = st.number_input(
                 "Valor Materiales ($)",
-                min_value=0,
-                step=10000,
-                disabled=bool(st.session_state.materiales_lista),
+                min_value=0.0,
+                step=10000.0,
+                disabled=materiales_total_editor > 0.0,
+                value=materiales_total_editor, # Pasamos el valor directamente
                 help="Se desactiva si usas el listado de materiales.",
             )
 
         # ---------------- SUBMIT FINAL ----------------
-        submitted = st.form_submit_button("✓ Guardar Cotización")
+        submitted = st.form_submit_button("✓ Guardar Cotización") # Aquí está el botón
 
         if submitted:
             if not nombre_cliente_seleccionado or not descripcion or descripcion == "<p><br></p>" or not titulo:
                 st.warning("El cliente, el título y la descripción son obligatorios.")
                 return
-
+            
+            # Se permite mano_obra > 0
+            if mano_obra <= 0:
+                st.warning("El valor de mano de obra debe ser mayor a cero.")
+                return
+            
             id_cliente = clientes_dict[nombre_cliente_seleccionado]
 
-            # Total materiales
-            if st.session_state.materiales_lista:
-                materiales_total = sum(
-                    m["total"] for m in st.session_state.materiales_lista
+            # ---------------- INICIO DE PROCESAMIENTO DE MATERIALES ----------------
+
+            df_a_guardar = st.session_state.materiales_df.copy()
+            
+            materiales_lista = []
+            
+            if not df_a_guardar.empty:
+                
+                # 1. FILTRAR FILAS INVÁLIDAS Y VACÍAS (Las que no tienen datos esenciales)
+                df_a_guardar = df_a_guardar.dropna(
+                    subset=["Material", "Cantidad", "Valor Unitario"],
+                    how="any"
+                ).reset_index(drop=True)
+                
+                # Asegurar que los valores numéricos sean válidos para el cálculo
+                df_a_guardar = df_a_guardar[
+                    (df_a_guardar["Cantidad"] > 0)
+                ].reset_index(drop=True)
+
+            # Si después de filtrar, el DataFrame tiene datos válidos:
+            if not df_a_guardar.empty:
+                
+                # 2. RENOMBRAR COLUMNAS
+                df_a_guardar.rename(
+                    columns={
+                        "Unidad": "unidad",
+                        "Material": "material",
+                        "Cantidad": "cantidad",
+                        "Valor Unitario": "valor_unitario",
+                    },
+                    inplace=True,
                 )
-            else:
-                materiales_total = materiales_manual
+                
+                # 3. FORZAR TIPOS DE DATOS PARA CADA CAMPO (Según tu JSON Schema)
+                # 'valor_unitario' debe ser INT
+                df_a_guardar["valor_unitario"] = df_a_guardar["valor_unitario"].astype(float)
+                # 'cantidad' debe ser DOUBLE/FLOAT
+                df_a_guardar["cantidad"] = df_a_guardar["cantidad"].astype(float)
+
+                # 4. Calcular la columna "total" (debe ser DOUBLE/FLOAT)
+                df_a_guardar["total"] = (
+                    df_a_guardar["cantidad"] *
+                    df_a_guardar["valor_unitario"]
+                ).astype(float)
+                
+                # 5. Convertir a lista de diccionarios
+                materiales_lista = df_a_guardar.to_dict(orient="records")
+
+            # Cálculo final del total de materiales
+            materiales_total_calculado = (
+                sum(m["total"] for m in materiales_lista)
+                if materiales_lista
+                else materiales_manual
+            )
+            
+            # SOLUCIÓN AL PROBLEMA: Aseguramos que materiales_total sea float (double)
+            materiales_total_double = float(materiales_total_calculado) 
+            
+            # Aseguramos que mano_obra sea un entero
+            mano_obra_entero = int(mano_obra)
+            
+            # Cálculo del total general
+            total_general = mano_obra_entero + materiales_total_double
 
             try:
                 with mongo_connection.client.start_session() as session:
@@ -161,7 +223,7 @@ def show():
 
                         secuencia = contador["secuencia"]
                         anio = str(fecha_cotizacion.year)[-2:]
-                        numero_cotizacion = f"{anio}{secuencia:04d}"
+                        numero_cotizacion = f"{anio}{secuencia:03d}"
 
                         quote_data = {
                             "cliente_id": id_cliente,
@@ -171,31 +233,34 @@ def show():
                             ),
                             "titulo": titulo,
                             "descripcion": descripcion,
-                            "mano_obra": mano_obra,
-                            "materiales_total": materiales_total,
-                            "materiales_lista": st.session_state.materiales_lista,
+                            "mano_obra": float(mano_obra_entero),
+                            "materiales_lista": materiales_lista,
+                            "materiales_total": materiales_total_double, # Usamos el valor DOUBLE
+                            "total_general": total_general,
                             "estado": "Pendiente",
                             "secuencia": secuencia,
                             "numero_cotizacion": numero_cotizacion,
                             "created_at": datetime.now(),
                         }
                         
-                        if not st.session_state.materiales_lista:
+                        if not materiales_lista:
                             quote_data.pop("materiales_lista", None)
 
                         COTIZACIONES.insert_one(quote_data, session=session)
 
                 st.success(
-                    f"¡Cotización {numero_cotizacion} guardada con éxito!"
+                    f"¡Cotización {numero_cotizacion} guardada con éxito! Total General: ${total_general:,.0f}"
                 )
 
-                # limpiar materiales
-                st.session_state.materiales_lista = []
-                
+                # limpiar materiales (tabla tipo Excel)
+                st.session_state.materiales_df = pd.DataFrame(
+                    columns=["Unidad", "Material", "Cantidad", "Valor Unitario"]
+                )
+
                 st.session_state.menu_principal = "Cotizaciones"
                 st.session_state.submenu = "Listar Cotizaciones"
 
                 st.rerun()
-
+                
             except Exception as e:
                 st.error(f"Ocurrió un error al guardar la cotización: {e}")

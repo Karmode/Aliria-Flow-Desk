@@ -17,7 +17,7 @@ def show():
         return
 
     # ─────────────────────────────────────────────
-    # Filtros
+    # FILTROS
     # ─────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
 
@@ -29,11 +29,13 @@ def show():
         )
 
     with col2:
+        # Usamos el año actual para el valor máximo, pero lo inicializamos con el año actual
         anio = st.number_input(
             "Año",
             min_value=2020,
             max_value=datetime.now().year,
             value=datetime.now().year,
+            step=1,
             key="filtro_anio"
         )
 
@@ -43,71 +45,137 @@ def show():
             key="filtro_buscar"
         )
 
+
     # ─────────────────────────────────────────────
-    # Query
+    # CONSTRUCCIÓN DE LA CONSULTA
     # ─────────────────────────────────────────────
     query = {}
 
     if estado != "Todas":
         query["estado"] = estado
 
+    # Consulta por rango de fecha para el año
     query["fecha"] = {
         "$gte": datetime(anio, 1, 1),
         "$lte": datetime(anio, 12, 31, 23, 59, 59)
     }
 
     if buscar:
+        # Aseguramos que la búsqueda por número de cotización sea por string/regex
         query["$or"] = [
             {"nombre_cliente": {"$regex": buscar, "$options": "i"}},
-            {"numero_cotizacion": {"$regex": buscar}}
+            {"numero_cotizacion": {"$regex": buscar, "$options": "i"}} # Búsqueda por número
         ]
 
     cotizaciones = list(
-        COTIZACIONES.find(query).sort("fecha", -1)
+        COTIZACIONES.find(query).sort("numero_cotizacion", -1)
     )
 
     if not cotizaciones:
-        st.info("No hay cotizaciones para mostrar.")
+        st.info("No hay cotizaciones para mostrar con los filtros seleccionados.")
         return
 
     st.markdown("### Resultados")
+    
+    # ─────────────────────────────────────────────
+    # MOSTRAR RESULTADOS
+    # ─────────────────────────────────────────────
 
-    # ─────────────────────────────────────────────
-    # Listado interactivo
-    # ─────────────────────────────────────────────
     for c in cotizaciones:
-        total = c.get("mano_obra", 0) + c.get("materiales_total", 0)
+        # Usamos .get() para evitar errores si falta la clave y forzamos a float para el cálculo
+        mano_obra = float(c.get("mano_obra", 0))
+        materiales_total = float(c.get("materiales_total", 0))
+        total = mano_obra + materiales_total
 
+        # El expander ahora solo muestra los datos clave
         with st.expander(
-            f"📄 {c['numero_cotizacion']} — {c['nombre_cliente']} — {c.get('titulo', '')} — ${total:,.0f} — {c['estado']}",
+            f"📄 {c.get('numero_cotizacion', 'N/A')} — {c.get('nombre_cliente', 'N/A')} — {c.get('titulo', 'N/A')} —"
+            f"${total:,.0f} — **{c.get('estado', 'Desconocido')}**",
             expanded=False
         ):
-            col1, col2 = st.columns(2)
+            # 1. BOTONES DE ACCIÓN (Ver Cotización, Crear CC/Ver CC)
+            st.markdown("##### Acciones Rápidas")
+            
+            # Usamos 3 columnas para los botones de acción
+            col_acc1, col_acc2, col_acc3, _ = st.columns([1, 1, 1, 3]) 
+            
+            # --- BOTÓN 1: VER COTIZACIÓN ---
+            with col_acc1:
+                if st.button(
+                    "🔎 Ver Cotización",
+                    key=f"ver_cot_{c['_id']}",
+                    use_container_width=True
+                ):
+                    st.session_state.menu_principal = "Cotizaciones"
+                    st.session_state.submenu = "Ver Cotización"
+                    # Usamos 'cotizacion_id_ver' que definimos en la página 'ver_cotizacion.py'
+                    st.session_state.cotizacion_id_ver = str(c["_id"]) 
+                    st.rerun()
 
-            with col1:
-                st.write("**Fecha:**", c["fecha"].strftime("%Y-%m-%d"))
+            # --- BOTÓN 2 & 3: CUENTA DE COBRO ---
+            tiene_cc = c.get("tiene_cuenta_cobro", False)
+            
+            if not tiene_cc:
+                # CREAR CC
+                with col_acc2:
+                    if st.button(
+                        "🧾 Crear Cuenta de Cobro",
+                        key=f"crear_cc_{c['_id']}",
+                        use_container_width=True
+                    ):
+                        st.session_state.menu_principal = "Cuentas de Cobro"
+                        st.session_state.submenu = "Crear Cuenta de Cobro"
+                        st.session_state.cotizacion_id = str(c["_id"])
+                        st.rerun()
+            else:
+                # VER CC
+                cuenta_cobro_id = c.get("cuenta_cobro_id")
+                with col_acc3:
+                    if st.button(
+                        "📂 Ver Cuenta de Cobro",
+                        key=f"ver_cc_{c['_id']}",
+                        use_container_width=True
+                    ):
+                        st.session_state.menu_principal = "Cuentas de Cobro"
+                        st.session_state.submenu = "Ver Cuenta de Cobro"
+                        # Usamos 'cuenta_cobro_id_ver' que definimos en la página 'ver_cuenta_cobro.py'
+                        st.session_state.cuenta_cobro_id_ver = str(cuenta_cobro_id)
+                        st.rerun()
+            
+            st.markdown("---")
+            
+            # 2. INFORMACIÓN Y CAMBIO DE ESTADO (MÁS ABAJO)
+            st.markdown("##### Actualizar Estado")
+
+            col_info, col_estado = st.columns([1, 1])
+
+            # ───────── Información ─────────
+            with col_info:
+                st.write("**Título:**", c.get('titulo', 'N/A'))
+                st.write("**Fecha de Creación:**", c["fecha"].strftime("%Y-%m-%d"))
+                st.write("**Total:**", f'${total:,.0f}')
                 st.write("**Estado actual:**", c["estado"])
 
-            with col2:
+            # ───────── Cambiar estado ─────────
+            with col_estado:
                 nuevo_estado = st.selectbox(
-                    "Cambiar estado",
+                    "Selecciona el nuevo estado:",
                     ["Pendiente", "Aprobada", "Rechazada"],
                     index=["Pendiente", "Aprobada", "Rechazada"].index(c["estado"]),
                     key=f"estado_{c['_id']}"
                 )
 
-            # ───────── Guardar estado ─────────
-            if st.button(
-                "💾 Guardar cambios",
-                key=f"guardar_{c['_id']}"
-            ):
-                try:
-                    COTIZACIONES.update_one(
-                        {"_id": ObjectId(c["_id"])},
-                        {"$set": {"estado": nuevo_estado}}
-                    )
-                    st.success("Estado actualizado correctamente")
+                if st.button(
+                    "💾 Guardar estado",
+                    key=f"guardar_estado_{c['_id']}",
+                    use_container_width=True
+                ):
+                    try:
+                        COTIZACIONES.update_one(
+                            {"_id": c["_id"]},
+                            {"$set": {"estado": nuevo_estado, "updated_at": datetime.now()}}
+                        )
+                        st.success(f"Estado de la cotización {c.get('numero_cotizacion')} actualizado a **{nuevo_estado}**.")
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
                     st.rerun()
-
-                except Exception as e:
-                    st.error(f"Error al actualizar estado: {e}")
