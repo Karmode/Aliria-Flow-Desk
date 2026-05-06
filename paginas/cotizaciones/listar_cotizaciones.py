@@ -3,6 +3,15 @@ from datetime import datetime
 from db.client import MongoDBConnection
 from bson import ObjectId
 
+
+estados_con_iconos = {
+    "Aprobada": "✅ Aprobada",
+    "Rechazada": "❌ Rechazada",
+    "Pendiente": "⏳ Pendiente",
+    "Por Cobrar": "💼 Por Cobrar",
+    "Pagada": "💰 Pagada",
+}
+
 def show():
     st.title("Listado de Cotizaciones")
     st.markdown("---")
@@ -24,7 +33,7 @@ def show():
     with col1:
         estado = st.selectbox(
             "Estado",
-            ["Todas", "Pendiente", "Aprobada", "Rechazada"],
+            ["Todas", "Aprobada", "Rechazada", "Pendiente", "Por Cobrar", "Pagada"],
             key="filtro_estado"
         )
 
@@ -90,19 +99,19 @@ def show():
         # El expander ahora solo muestra los datos clave
         with st.expander(
             f"📄 {c.get('numero_cotizacion', 'N/A')} — {c.get('nombre_cliente', 'N/A')} — {c.get('titulo', 'N/A')} —"
-            f"${total:,.0f} — **{c.get('estado', 'Desconocido')}**",
+            f"${total:,.0f} — **{estados_con_iconos.get(c.get('estado', 'Desconocido'), c.get('estado', 'Desconocido'))}**",
             expanded=False
         ):
             # 1. BOTONES DE ACCIÓN (Ver Cotización, Crear CC/Ver CC)
             st.markdown("##### Acciones Rápidas")
             
-            # Usamos 3 columnas para los botones de acción
-            col_acc1, col_acc2, col_acc3, _ = st.columns([1, 1, 1, 3]) 
+            # Usamos 4 columnas para los botones de acción
+            col_acc1, col_acc2, col_acc3, col_acc4 = st.columns([1, 1, 1, 1]) 
             
             # --- BOTÓN 1: VER COTIZACIÓN ---
             with col_acc1:
                 if st.button(
-                    "🔎 Ver Cotización",
+                    "🔎 Ver",
                     key=f"ver_cot_{c['_id']}",
                     use_container_width=True
                 ):
@@ -112,14 +121,26 @@ def show():
                     st.session_state.cotizacion_id_ver = str(c["_id"]) 
                     st.rerun()
 
-            # --- BOTÓN 2 & 3: CUENTA DE COBRO ---
+            # --- BOTÓN 2: EDITAR COTIZACIÓN ---
+            with col_acc2:
+                if st.button(
+                    "✏️ Editar",
+                    key=f"editar_cot_{c['_id']}",
+                    use_container_width=True
+                ):
+                    st.session_state.menu_principal = "Cotizaciones"
+                    st.session_state.submenu = "Editar Cotización"
+                    st.session_state.cotizacion_id_editar = str(c["_id"])
+                    st.rerun()
+
+            # --- BOTÓN 3 & 4: CUENTA DE COBRO ---
             tiene_cc = c.get("tiene_cuenta_cobro", False)
             
             if not tiene_cc:
                 # CREAR CC
-                with col_acc2:
+                with col_acc3:
                     if st.button(
-                        "🧾 Crear Cuenta de Cobro",
+                        "🧾 Crear CC",
                         key=f"crear_cc_{c['_id']}",
                         use_container_width=True
                     ):
@@ -132,7 +153,7 @@ def show():
                 cuenta_cobro_id = c.get("cuenta_cobro_id")
                 with col_acc3:
                     if st.button(
-                        "📂 Ver Cuenta de Cobro",
+                        "📂 Ver CC",
                         key=f"ver_cc_{c['_id']}",
                         use_container_width=True
                     ):
@@ -140,6 +161,18 @@ def show():
                         st.session_state.submenu = "Ver Cuenta de Cobro"
                         # Usamos 'cuenta_cobro_id_ver' que definimos en la página 'ver_cuenta_cobro.py'
                         st.session_state.cuenta_cobro_id_ver = str(cuenta_cobro_id)
+                        st.rerun()
+
+                # EDITAR CC
+                with col_acc4:
+                    if st.button(
+                        "✏️ Editar CC",
+                        key=f"editar_cc_{c['_id']}",
+                        use_container_width=True
+                    ):
+                        st.session_state.menu_principal = "Cuentas de Cobro"
+                        st.session_state.submenu = "Editar Cuenta de Cobro"
+                        st.session_state.cuenta_cobro_id_editar = str(cuenta_cobro_id)
                         st.rerun()
             
             st.markdown("---")
@@ -157,11 +190,12 @@ def show():
                 st.write("**Estado actual:**", c["estado"])
 
             # ───────── Cambiar estado ─────────
-            with col_estado:
+            with col_estado:                
                 nuevo_estado = st.selectbox(
                     "Selecciona el nuevo estado:",
-                    ["Pendiente", "Aprobada", "Rechazada"],
-                    index=["Pendiente", "Aprobada", "Rechazada"].index(c["estado"]),
+                    ["Aprobada", "Rechazada", "Pendiente", "Por Cobrar", "Pagada"],
+                    format_func=lambda x: estados_con_iconos[x],
+                    index=["Aprobada", "Rechazada", "Pendiente", "Por Cobrar", "Pagada"].index(c["estado"]),
                     key=f"estado_{c['_id']}"
                 )
 

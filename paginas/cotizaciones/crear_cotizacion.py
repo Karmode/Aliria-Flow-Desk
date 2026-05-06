@@ -124,6 +124,32 @@ def show():
                 help="Se desactiva si usas el listado de materiales.",
             )
 
+        # Anticipo (Opcional)
+        col5, col6 = st.columns(2)
+        with col5:
+            anticipo = st.number_input(
+                "Anticipo ($) - OPCIONAL",
+                min_value=0.0,
+                step=10000.0,
+                help="Monto del anticipo para esta cotización (opcional)",
+            )
+
+        with col6:
+            st.info(f"ℹ️ Anticipo ingresado: ${anticipo:,.0f}")
+
+        # Descuento (Opcional)
+        col7, col8 = st.columns(2)
+        with col7:
+            descuento = st.number_input(
+                "Descuento ($) - OPCIONAL",
+                min_value=0.0,
+                step=10000.0,
+                help="Monto de descuento a aplicar (opcional)",
+            )
+
+        with col8:
+            st.info(f"ℹ️ Descuento ingresado: ${descuento:,.0f}")
+
         # ---------------- SUBMIT FINAL ----------------
         submitted = st.form_submit_button("✓ Guardar Cotización") # Aquí está el botón
 
@@ -200,12 +226,22 @@ def show():
             # Aseguramos que mano_obra sea un entero
             mano_obra_entero = int(mano_obra)
             
-            # Cálculo del total general
-            total_general = mano_obra_entero + materiales_total_double
+            # Subtotal antes de descuentos
+            subtotal = mano_obra_entero + materiales_total_double
+            
+            # Descuento
+            descuento_float = float(descuento) if descuento > 0 else 0.0
+            
+            # Cálculo del total general (subtotal - descuento)
+            total_general = subtotal - descuento_float
 
             try:
                 with mongo_connection.client.start_session() as session:
                     with session.start_transaction():
+
+                        # Obtener datos del cliente incluyendo dirección
+                        cliente_doc = CLIENTES.find_one({"_id": id_cliente}, session=session)
+                        direccion_cliente = cliente_doc.get("direccion", "") if cliente_doc else ""
 
                         contador = CONTADORES.find_one_and_update(
                             {"nombre": "cotizaciones", "año": fecha_cotizacion.year},
@@ -228,6 +264,7 @@ def show():
                         quote_data = {
                             "cliente_id": id_cliente,
                             "nombre_cliente": nombre_cliente_seleccionado,
+                            "direccion_cliente": direccion_cliente,
                             "fecha": datetime.combine(
                                 fecha_cotizacion, datetime.min.time()
                             ),
@@ -236,7 +273,10 @@ def show():
                             "mano_obra": float(mano_obra_entero),
                             "materiales_lista": materiales_lista,
                             "materiales_total": materiales_total_double, # Usamos el valor DOUBLE
+                            "subtotal": subtotal,
+                            "descuento": descuento_float,
                             "total_general": total_general,
+                            "anticipo": float(anticipo) if anticipo > 0 else 0.0,
                             "estado": "Pendiente",
                             "secuencia": secuencia,
                             "numero_cotizacion": numero_cotizacion,

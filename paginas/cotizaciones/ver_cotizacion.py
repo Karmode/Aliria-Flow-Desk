@@ -2,6 +2,7 @@ import streamlit as st
 from bson import ObjectId
 import pandas as pd
 from datetime import datetime
+import base64
 
 from db.client import MongoDBConnection
 from utils.pdf_generator import generate_pdf 
@@ -27,6 +28,15 @@ def show():
     if not cotizacion:
         st.error("Cotización no encontrada.")
         return
+
+    # ───────────────── Obtener dirección del cliente ─────────────────
+    CLIENTES = db["clientes"]
+    cliente_id = cotizacion.get("cliente_id")
+    cliente = CLIENTES.find_one({"_id": cliente_id}) if cliente_id else None
+    direccion_cliente = cliente.get("direccion", "") if cliente else ""
+    
+    # Agregar dirección al documento para el PDF
+    cotizacion["direccion_cliente"] = direccion_cliente
 
     # ───────────────── GENERACIÓN DE PDF ─────────────────
     pdf_bytes, filename = generate_pdf(cotizacion, doc_type="Cotización")
@@ -64,6 +74,16 @@ def show():
             st.session_state.menu_principal = "Cotizaciones"
             st.session_state.submenu = "Listar Cotizaciones"
             st.rerun()
+    
+    st.markdown("---")
+    
+    # Previsualización del PDF
+    st.subheader("📄 Previsualización")
+    pdf_base64 = base64.b64encode(pdf_bytes).decode()
+    st.markdown(
+        f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="100%" height="700" style="border:1px solid #ddd;"></iframe>',
+        unsafe_allow_html=True
+    )
             
     st.markdown("---")
 
@@ -79,7 +99,34 @@ def show():
     
     col_c1.metric("Mano de Obra", f"${cotizacion.get('mano_obra', 0):,.0f}")
     col_c2.metric("Total Materiales", f"${cotizacion.get('materiales_total', 0):,.0f}")
+    
+    # Mostrar subtotal y descuentos
+    subtotal = cotizacion.get('subtotal', cotizacion.get('total_general', 0) + cotizacion.get('descuento', 0))
+    st.markdown("---")
+    st.write(f"**Subtotal:** ${subtotal:,.0f}")
+    
+    # Descuento
+    descuento = cotizacion.get('descuento', 0)
+    if descuento > 0:
+        st.write(f"**Descuento:** -${descuento:,.0f}")
+    
+    # Anticipo solicitado
+    anticipo = cotizacion.get('anticipo', 0)
+    if anticipo > 0:
+        st.write(f"**Anticipo solicitado:** -${anticipo:,.0f}")
+        neto_sin_anticipo = subtotal - descuento
+        st.write(f"**Saldo a cobrar:** ${neto_sin_anticipo:,.0f}")
+    
+    st.markdown("---")
     col_c3.metric("TOTAL GENERAL", f"${cotizacion.get('total_general', 0):,.0f}")
+
+    # Anticipo (si existe)
+    anticipo = cotizacion.get('anticipo', 0)
+    if anticipo > 0:
+        st.markdown("##### Anticipo")
+        st.info(f"**Anticipo solicitado:** ${anticipo:,.0f}")
+        neto = cotizacion.get('total_general', 0) - anticipo
+        st.write(f"**Saldo a cobrar:** ${neto:,.0f}")
 
     # Lista de Materiales
     st.markdown("##### Desglose de Materiales")

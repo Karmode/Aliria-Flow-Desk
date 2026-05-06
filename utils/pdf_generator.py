@@ -21,6 +21,26 @@ NORMAL_FONT_SIZE = 10
 LINE_HEIGHT = 8
 COLOR_HEADER = (200, 220, 255) # Azul claro para fondo de tablas/secciones
 
+def sanitizar_texto(texto):
+    """Reemplaza caracteres especiales por equivalentes compatibles con FPDF"""
+    if not isinstance(texto, str):
+        return texto
+    
+    reemplazos = {
+        '–': '-',   # En-dash por guión normal
+        '—': '-',   # Em-dash por guión normal
+        ''': "'",   # Comilla curva por comilla normal
+        ''': "'",   # Comilla curva por comilla normal
+        '"': '"',   # Comilla curva doble por comilla normal
+        '"': '"',   # Comilla curva doble por comilla normal
+        '•': '*',   # Viñeta por asterisco
+    }
+    
+    for especial, normal in reemplazos.items():
+        texto = texto.replace(especial, normal)
+    
+    return texto
+
 class PDFGenerator(FPDF):
     
     def __init__(self, *args, **kwargs):
@@ -66,45 +86,76 @@ class PDFGenerator(FPDF):
         
         try:
             from bs4 import BeautifulSoup
+            from bs4.element import NavigableString
             import re
             
-            # 1. Limpieza de entidades y preparación
             import html
             cleaned_html = html.unescape(body)
-            
-            # --- 2. USAMOS BEAUTIFUL SOUP PARA INYECTAR SEPARACIÓN ---
             soup = BeautifulSoup(cleaned_html, 'html.parser')
+            root = soup.body or soup
 
-            # Asegurar que los títulos de sección (<strong>) tengan doble salto de línea antes
-            for strong_tag in soup.find_all('strong'):
-                # Inyectar doble salto de línea antes del strong
-                strong_tag.insert_before('\n\n') 
-                strong_tag.insert_after('\n') # Y un salto simple después
+            def normalize_text(raw_text):
+                normalized = re.sub(r'\s+', ' ', raw_text.replace('\xa0', ' ')).strip()
+                return normalized
 
-            # Asegurar la estructura de las listas: Iniciar con guion y salto de línea
-            for ul_tag in soup.find_all('ul'):
-                # Añadir un salto de línea antes y después de toda la lista
-                ul_tag.insert_before('\n') 
-                ul_tag.insert_after('\n')
+            def inline_text(tag):
+                return normalize_text(tag.get_text(" ", strip=True))
 
-            for li_tag in soup.find_all('li'):
-                # Reemplazamos el tag li por el texto precedido por '- ' y un salto de línea
-                li_tag.insert_before(f'- {li_tag.text.strip()}')
-                li_tag.replace_with('\n') # Reemplazamos el tag li por un salto de línea para separar ítems
+            lines = []
 
+            def append_line(text=""):
+                if text:
+                    lines.append(text)
+                    return
+                if lines and lines[-1] != "":
+                    lines.append("")
 
-            # 3. Extraer el texto limpio (eliminando todos los tags restantes)
-            # Usamos '\n' como separador para preservar los saltos inyectados
-            clean_text = soup.get_text(separator='\n', strip=True)
-            
-            # 4. LIMPIEZA POST-EXTRACCIÓN
-            
-            # Normalizar los saltos de línea excesivos (mantener máximo dos para separación de párrafo)
-            clean_text = re.sub(r'[\r\f\v]+', '', clean_text)
-            clean_text = re.sub(r' {2,}', ' ', clean_text) # Normalizar múltiples espacios a uno solo
-            
-            # Reducir secuencias de 3 o más saltos de línea a dos (párrafo)
-            clean_text = re.sub(r'\n{3,}', '\n\n', clean_text).strip()
+            def render_nodes(nodes):
+                for node in nodes:
+                    if isinstance(node, NavigableString):
+                        text = normalize_text(str(node))
+                        if text:
+                            append_line(text)
+                        continue
+
+                    if node.name in ("p", "div"):
+                        text = inline_text(node)
+                        if text:
+                            append_line(text)
+                            append_line()
+                        continue
+
+                    if node.name == "ul":
+                        for li in node.find_all("li", recursive=False):
+                            item = inline_text(li)
+                            if item:
+                                append_line(f"- {item}")
+                        append_line()
+                        continue
+
+                    if node.name == "ol":
+                        for idx, li in enumerate(node.find_all("li", recursive=False), start=1):
+                            item = inline_text(li)
+                            if item:
+                                append_line(f"{idx}. {item}")
+                        append_line()
+                        continue
+
+                    if node.name == "br":
+                        append_line()
+                        continue
+
+                    # Para otros tags contenedores, seguir recorriendo su contenido.
+                    render_nodes(node.children)
+
+            render_nodes(root.children)
+
+            clean_text = "\n".join(lines).strip()
+            clean_text = re.sub(r'\n{3,}', '\n\n', clean_text)
+            clean_text = re.sub(r'\n +', '\n', clean_text)
+
+            if not clean_text:
+                clean_text = "Sin descripcion."
             
             self.multi_cell(0, 5, clean_text)
 
@@ -114,7 +165,7 @@ class PDFGenerator(FPDF):
             self.multi_cell(0, 5, f"Error en la descripción: {e}")
             self.set_text_color(0, 0, 0)
             
-            body = body.replace("<p>", "").replace("</p>", "\n\n").replace("<br>", "\n").strip()
+            body = body.replace("<p>", "").replace("</p>", "\n\n").replace("<br>", "\n").replace("<br/>", "\n").strip()
             self.multi_cell(0, 5, body)
             
         self.ln(3)
@@ -139,17 +190,23 @@ def generate_pdf(data, doc_type="Cotización"):
     
     fecha_dt = data.get("fecha", datetime.now())
 
-    pdf.add_line_item("Cliente", data.get("nombre_cliente", "N/A"))
+    # Mostrar cliente con dirección
+    nombre_cliente = sanitizar_texto(data.get("nombre_cliente", "N/A"))
+    direccion_cliente = sanitizar_texto(data.get("direccion_cliente", ""))
+    
+    pdf.add_line_item("Cliente", nombre_cliente)
+    if direccion_cliente:
+        pdf.add_line_item("Dirección", direccion_cliente)
     
     if isinstance(fecha_dt, datetime):
         pdf.add_line_item("Fecha", fecha_dt.strftime("%d/%m/%Y"))
     
-    pdf.add_line_item("Título", data.get("titulo", "N/A"))
+    pdf.add_line_item("Título", sanitizar_texto(data.get("titulo", "N/A")))
     pdf.ln(5)
 
     # ------------------ DESCRIPCIÓN ------------------
     pdf.chapter_title("Descripción del Trabajo")
-    pdf.chapter_body(data.get("descripcion", "Sin descripción."))
+    pdf.chapter_body(sanitizar_texto(data.get("descripcion", "Sin descripción.")))
     pdf.ln(5)
 
     # ------------------ LISTADO DE MATERIALES ------------------
@@ -209,14 +266,81 @@ def generate_pdf(data, doc_type="Cotización"):
     pdf.cell(140, LINE_HEIGHT, "Total Materiales:", 0, 0, "R")
     pdf.cell(0, LINE_HEIGHT, f'${data.get("materiales_total", 0):,.0f}', 0, 1, "R")
     
+    # Calcular subtotal
+    subtotal = data.get("subtotal", data.get("total_sin_descuentos", data.get("total_general", 0)))
+    
+    pdf.ln(2)
+    
+    # Descuentos (si existen)
+    descuento_total = data.get("descuento_total", data.get("descuento", 0))
+    descuento_cotizacion = data.get("descuento_cotizacion", data.get("descuento", 0))
+    descuento_adicional = data.get("descuento_adicional", 0)
+    
+    if descuento_total > 0:
+        pdf.set_font("Arial", "", NORMAL_FONT_SIZE)
+        # Si hay múltiples descuentos, mostrar desglose
+        hay_multiples_descuentos = (descuento_cotizacion > 0) and (descuento_adicional > 0)
+        
+        if hay_multiples_descuentos:
+            # Mostrar desglose cuando hay más de un descuento
+            pdf.cell(140, LINE_HEIGHT, f"Descuento cotización:", 0, 0, "R")
+            pdf.cell(0, LINE_HEIGHT, f'-${descuento_cotizacion:,.0f}', 0, 1, "R")
+            pdf.cell(140, LINE_HEIGHT, f"Descuento adicional:", 0, 0, "R")
+            pdf.cell(0, LINE_HEIGHT, f'-${descuento_adicional:,.0f}', 0, 1, "R")
+            pdf.cell(140, LINE_HEIGHT, "Total Descuento:", 0, 0, "R")
+            pdf.cell(0, LINE_HEIGHT, f'-${descuento_total:,.0f}', 0, 1, "R")
+        else:
+            # Mostrar solo un descuento cuando hay uno solo
+            pdf.cell(140, LINE_HEIGHT, f"Descuento:", 0, 0, "R")
+            pdf.cell(0, LINE_HEIGHT, f'-${descuento_total:,.0f}', 0, 1, "R")
+    
     pdf.ln(2)
     pdf.set_font("Arial", "B", HEADER_FONT_SIZE)
-    pdf.cell(140, LINE_HEIGHT, "TOTAL GENERAL:", 'T', 0, "R")
+    
+    # Determinar el nombre del total según el tipo de documento
+    if doc_type == "Cuenta de Cobro":
+        titulo_total = "TOTAL A COBRAR:"
+    else:
+        titulo_total = "TOTAL GENERAL:"
+    
+    pdf.cell(140, LINE_HEIGHT, titulo_total, 'T', 0, "R")
     pdf.cell(0, LINE_HEIGHT, f'${total_value:,.0f}', 'T', 1, "R")
     pdf.ln(5)
 
-    # ------------------ FIRMA (SOLO CUENTA DE COBRO) ------------------
-    if doc_type == "Cuenta de Cobro":
+    # Obtener datos de anticipo para la sección de términos
+    anticipo_original = data.get("anticipo_original", data.get("anticipo", 0))
+    anticipo_aplicado = data.get("anticipo", 0)
+    
+    # Sección de Términos (solo si hay anticipo)
+    if anticipo_original > 0:
+        pdf.ln(3)
+        pdf.set_fill_color(*COLOR_HEADER)
+        pdf.set_font("Arial", "B", HEADER_FONT_SIZE)
+        pdf.cell(0, LINE_HEIGHT, "TÉRMINOS", 0, 1, "L", 1)
+        pdf.ln(2)
+        
+        # Texto explicativo
+        pdf.set_font("Arial", "", NORMAL_FONT_SIZE)
+        explicacion = "Se solicita un anticipo para poder asegurar los materiales y la disponibilidad en las fechas acordadas para ejecutar el trabajo."
+        pdf.set_xy(10, pdf.get_y())
+        pdf.multi_cell(0, LINE_HEIGHT, explicacion, 0, "L")
+        pdf.ln(2)
+        
+        # Información del anticipo
+        pdf.set_font("Arial", "", NORMAL_FONT_SIZE)
+        if doc_type == "Cotización":
+            pdf.set_font("Arial", "B", NORMAL_FONT_SIZE)
+            pdf.cell(0, LINE_HEIGHT, f"Anticipo solicitado: ${anticipo_original:,.0f}", 0, 1, "L")
+        elif doc_type == "Cuenta de Cobro":
+            if anticipo_aplicado > 0:
+                pdf.set_font("Arial", "B", NORMAL_FONT_SIZE)
+                pdf.cell(0, LINE_HEIGHT, f"Anticipo pagado: ${anticipo_aplicado:,.0f}", 0, 1, "L")
+            else:
+                pdf.set_font("Arial", "I", NORMAL_FONT_SIZE)
+                pdf.cell(0, LINE_HEIGHT, f"Anticipo de cotización: ${anticipo_original:,.0f} (no pagado)", 0, 1, "L")
+
+    # Firmas
+    if doc_type in ["Cotización", "Cuenta de Cobro"]:
         pdf.ln(10)
         
         # Intentar agregar la firma
@@ -233,7 +357,7 @@ def generate_pdf(data, doc_type="Cotización"):
                 pdf.ln(5)
         
         pdf.set_font("Arial", "B", NORMAL_FONT_SIZE)
-        pdf.cell(0, LINE_HEIGHT, f"___________________________", 0, 1, "C")
+        pdf.cell(0, LINE_HEIGHT, "___________________________", 0, 1, "C")
         pdf.cell(0, LINE_HEIGHT, CONTRATISTA_NOMBRE, 0, 1, "C")
         pdf.cell(0, LINE_HEIGHT, f"C.C. {CONTRATISTA_CC}", 0, 1, "C")
         pdf.ln(5)
@@ -283,12 +407,21 @@ def generate_pdf(data, doc_type="Cotización"):
                 pdf.ln(5)
 
 
-    # Generar el nombre de archivo
+    # Generar el nombre de archivo con información descriptiva
     numero = data.get('numero_cotizacion', 'sindato')
-    if doc_type == "Cotización":
-        filename = f"Cotizacion_{numero}.pdf"
+    nombre_cliente = data.get('nombre_cliente', 'Cliente').replace(" ", "_")
+    
+    # Obtener la fecha formateada
+    fecha_doc = data.get('fecha')
+    if fecha_doc and isinstance(fecha_doc, datetime):
+        fecha_str = fecha_doc.strftime('%d-%m-%Y')
     else:
-        filename = f"CuentaCobro_{numero}.pdf"
+        fecha_str = 'sin_fecha'
+    
+    if doc_type == "Cotización":
+        filename = f"Cotizacion-{numero}-{nombre_cliente}-{fecha_str}.pdf"
+    else:
+        filename = f"CuentaCobro-{numero}-{nombre_cliente}-{fecha_str}.pdf"
 
     pdf_bytes = bytes(pdf.output(dest="S"))
     

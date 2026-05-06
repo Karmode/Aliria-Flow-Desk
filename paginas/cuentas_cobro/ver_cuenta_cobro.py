@@ -3,6 +3,7 @@ from bson import ObjectId
 import pandas as pd
 from datetime import datetime
 import os
+import base64
 
 from db.client import MongoDBConnection
 from utils.pdf_generator import generate_pdf 
@@ -28,6 +29,15 @@ def show():
     if not cuenta:
         st.error("Cuenta de cobro no encontrada.")
         return
+
+    # ───────────────── Obtener dirección del cliente ─────────────────
+    CLIENTES = db["clientes"]
+    cliente_id = cuenta.get("cliente_id")
+    cliente = CLIENTES.find_one({"_id": cliente_id}) if cliente_id else None
+    direccion_cliente = cliente.get("direccion", "") if cliente else ""
+    
+    # Agregar dirección al documento para el PDF
+    cuenta["direccion_cliente"] = direccion_cliente
 
     # ───────────────── GENERACIÓN DE PDF ─────────────────
     pdf_bytes, filename = generate_pdf(cuenta, doc_type="Cuenta de Cobro")
@@ -66,6 +76,16 @@ def show():
             st.rerun()
             
     st.markdown("---")
+    
+    # Previsualización del PDF
+    st.subheader("📄 Previsualización")
+    pdf_base64 = base64.b64encode(pdf_bytes).decode()
+    st.markdown(
+        f'<iframe src="data:application/pdf;base64,{pdf_base64}" width="100%" height="700" style="border:1px solid #ddd;"></iframe>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown("---")
 
     # Detalles
     st.markdown(f"### {cuenta.get('titulo', 'Sin título')}")
@@ -78,7 +98,55 @@ def show():
     
     col_c1.metric("Mano de Obra", f"${cuenta.get('mano_obra', 0):,.0f}")
     col_c2.metric("Total Materiales", f"${cuenta.get('materiales_total', 0):,.0f}")
-    col_c3.metric("TOTAL FINAL", f"${cuenta.get('total', 0):,.0f}") # Usamos 'total'
+    
+    # Desglose de descuentos y anticipo
+    st.markdown("---")
+    total_sin_descuentos = cuenta.get('total_sin_descuentos', 0)
+    anticipo_aplicado = cuenta.get('anticipo', 0)
+    descuento_total = cuenta.get('descuento_total', 0)
+    
+    st.write(f"**Subtotal:** ${total_sin_descuentos:,.0f}")
+    
+    # Anticipo
+    anticipo_original = cuenta.get('anticipo_original', 0)
+    if anticipo_original > 0:
+        if anticipo_aplicado > 0:
+            st.write(f"**Anticipo:** -${anticipo_aplicado:,.0f}")
+        else:
+            st.write(f"**Anticipo:** (no aplicado)")
+    
+    # Descuentos
+    descuento_cotizacion = cuenta.get('descuento_cotizacion', 0)
+    descuento_adicional = cuenta.get('descuento_adicional', 0)
+    if descuento_total > 0:
+        if descuento_cotizacion > 0:
+            st.write(f"  • Descuento cotización: -${descuento_cotizacion:,.0f}")
+        if descuento_adicional > 0:
+            st.write(f"  • Descuento adicional: -${descuento_adicional:,.0f}")
+        st.write(f"**Descuento total:** -${descuento_total:,.0f}")
+    
+    st.markdown("---")
+    col_c3.metric("TOTAL A COBRAR", f"${cuenta.get('total', 0):,.0f}")
+    
+    # Anticipo (si fue aplicado)
+    anticipo_aplicado = cuenta.get('anticipo', 0)
+    anticipo_original = cuenta.get('anticipo_original', 0)
+    if anticipo_original > 0:
+        st.markdown("---")
+        st.markdown("##### ⏳ Anticipo")
+        col_ant1, col_ant2 = st.columns(2)
+        with col_ant1:
+            st.metric("Anticipo Original", f"${anticipo_original:,.0f}")
+        with col_ant2:
+            if anticipo_aplicado > 0:
+                st.success(f"✓ Anticipo Aplicado: ${anticipo_aplicado:,.0f}")
+            else:
+                st.warning(f"✗ Anticipo No Aplicado (no pagado)")
+        
+        total_sin_anticipo = cuenta.get('total_sin_descuentos', cuenta.get('total', 0) + anticipo_aplicado)
+        st.write(f"**Total sin anticipo:** ${total_sin_anticipo:,.0f}")
+        st.write(f"**Menos anticipo:** -${anticipo_aplicado:,.0f}")
+        st.write(f"**Total a cobrar:** ${cuenta.get('total', 0):,.0f}")
     
     # Lista de Materiales
     st.markdown("##### Desglose de Materiales")
