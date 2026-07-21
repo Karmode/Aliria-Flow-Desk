@@ -183,6 +183,11 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Soportes / imágenes subidas por usuarios (cuentas de cobro).
+# Se ignoran para no versionar archivos binarios; pendiente migrar a
+# almacenamiento en la nube.
+uploads/
+
 # PyPI configuration file
 .pypirc
 
