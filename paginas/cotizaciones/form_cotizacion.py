@@ -70,13 +70,20 @@ def render_form(prefix, clientes_dict, cot=None):
         )
     with col4:
         base_mat = float(cot.get("materiales_total", 0)) if cot else 0.0
+        matman_key = f"{prefix}_matman"
+        # Sembramos el valor vía session_state (sin `value=`) para que el campo
+        # muestre el total del editor cuando hay materiales, sin advertencias de
+        # Streamlit por combinar value= con una key ya existente.
+        if matman_key not in st.session_state:
+            st.session_state[matman_key] = base_mat
+        if mat_total_editor > 0:
+            st.session_state[matman_key] = float(mat_total_editor)
         materiales_manual = st.number_input(
             "Materiales ($)",
             min_value=0.0,
             step=10000.0,
-            value=mat_total_editor if mat_total_editor > 0 else base_mat,
             disabled=mat_total_editor > 0,
-            key=f"{prefix}_matman",
+            key=matman_key,
             help="Se desactiva si usas el listado de materiales.",
         )
 
