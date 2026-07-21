@@ -2,8 +2,8 @@ import streamlit as st
 from db.client import MongoDBConnection
 from paginas import home
 from paginas.clientes import listar_clientes, crear_clientes
-from paginas.cotizaciones import crear_cotizacion, listar_cotizaciones, ver_cotizacion, editar_cotizacion
-from paginas.cuentas_cobro import crear_cuenta_cobro, ver_cuenta_cobro, editar_cuenta_cobro, listar_cuentas_cobro
+from paginas.cotizaciones import gestion_cotizaciones
+from paginas.cuentas_cobro import gestion_cuentas_cobro
 
 # --- Configuración de la Página ---
 st.set_page_config(
@@ -21,18 +21,8 @@ pages = {
         "Listar Clientes": listar_clientes,
         "Crear Clientes": crear_clientes,
     },
-    "Cotizaciones": {
-        "Listar Cotizaciones": listar_cotizaciones,
-        "Crear Cotización": crear_cotizacion,
-        "Ver Cotización": ver_cotizacion,
-        "Editar Cotización": editar_cotizacion,
-    },
-    "Cuentas de Cobro": {
-        "Listar Cuentas": listar_cuentas_cobro,
-        "Crear Cuenta de Cobro": crear_cuenta_cobro,
-        "Ver Cuenta de Cobro": ver_cuenta_cobro,
-        "Editar Cuenta de Cobro": editar_cuenta_cobro,
-    }
+    "Cotizaciones": gestion_cotizaciones,
+    "Cuentas de Cobro": gestion_cuentas_cobro,
 }
 
 titulo_color = '''
