@@ -122,6 +122,8 @@ def _vista_detalle(cot, svc, id_str):
 
 def _vista_editar(cot, svc, id_str):
     st.markdown(f"### ✏️ Editar Cotización {cot.get('numero_cotizacion', '')}")
+    if cot.get("tiene_cuenta_cobro"):
+        st.caption("⚠️ Esta cotización ya tiene una cuenta de cobro; editarla NO actualiza la cuenta de cobro ya generada.")
     clientes_dict = svc.clientes_dict()
     datos = render_form(f"edit_{id_str}", clientes_dict, cot=cot)
     estado_actual = cot.get("estado", "Pendiente")

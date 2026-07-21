@@ -34,9 +34,11 @@ def _tab_listado(svc):
             key="cot_estado",
         )
     with c3:
+        if "cot_anio" not in st.session_state:
+            st.session_state["cot_anio"] = datetime.now().year
         anio = st.number_input(
             "Año", min_value=2020, max_value=datetime.now().year,
-            value=datetime.now().year, step=1, key="cot_anio",
+            step=1, key="cot_anio",
         )
     with c4:
         st.write("")

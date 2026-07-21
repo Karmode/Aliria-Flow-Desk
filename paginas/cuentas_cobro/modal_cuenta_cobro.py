@@ -88,6 +88,10 @@ def _detalle(cc, id_str):
         if st.button("📋 Ver Cotización original", key=f"ccvcot_{id_str}", use_container_width=True):
             st.session_state["menu_principal"] = "Cotizaciones"
             st.session_state["cot_buscar"] = cc.get("numero_cotizacion", "")
+            st.session_state["cot_estado"] = "Todas"
+            fecha_cc = cc.get("fecha")
+            if isinstance(fecha_cc, datetime):
+                st.session_state["cot_anio"] = fecha_cc.year
             st.rerun()
 
     st.divider()

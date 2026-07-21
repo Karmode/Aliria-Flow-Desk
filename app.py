@@ -59,8 +59,7 @@ def main():
     choice = st.sidebar.radio(
         "Menú",
         menu_keys,
-        index=menu_keys.index(st.session_state.menu_principal),
-        key="menu_principal_radio"
+        index=menu_keys.index(st.session_state.menu_principal)
     )
 
     # Si cambia menú → reset submenú
